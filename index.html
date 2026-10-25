@@ -552,12 +552,13 @@ function homeView() {
   const preview = nxt.items.slice(0, 5).map((i) => `<li>${esc(exName(i.ex))}</li>`).join('') + (nxt.items.length > 5 ? `<li class="mute">+ ${nxt.items.length - 5} more</li>` : '');
   return `${topbar('Lift Log')}
   ${syncCfg ? `<div class="row between"><div class="small syncmsg grow ${syncCfg.err ? 'bad' : ''}" data-sync>${esc(syncText())}</div><button class="btn ghost sm" data-act="gNow" data-syncbtn="mini" ${syncing ? 'disabled' : ''}>${esc(syncBtnLabel('mini'))}</button></div>` : ''}
-  ${d && !resumeHere ? `<div class="card row between" style="margin-top:8px"><div class="grow"><div class="eyebrow">In progress</div><b>${esc(dayById(d.dayId)?.name || 'Workout')}</b></div><button class="btn primary sm" data-act="resume">Resume</button></div>` : ''}
+  ${d && !resumeHere ? `<div class="card row between" style="margin-top:8px"><div class="grow"><div class="eyebrow">In progress</div><b>${esc(dayById(d.dayId)?.name || 'Workout')}</b></div><button class="btn ghost sm" data-act="discard" style="color:var(--bad)">Discard</button><button class="btn primary sm" data-act="resume">Resume</button></div>` : ''}
   <section class="card hero" style="margin-top:8px">
     <div class="eyebrow">${S.sessions.length ? 'Up next in your rotation' : 'Start here'}</div>
     <h2 style="margin-top:4px">${esc(nxt.name)}</h2>
     <ul>${preview}</ul>
     <button class="btn primary big" data-act="${resumeHere ? 'resume' : 'start'}" data-day="${esc(nxt.id)}">${resumeHere ? 'Resume workout' : 'Start workout'}</button>
+    ${resumeHere ? '<div style="text-align:center;margin-top:6px"><button class="btn ghost sm" data-act="discard" style="color:var(--bad)">Discard this workout</button></div>' : ''}
   </section>
   <h3>This week</h3>
   <div class="stats">
@@ -566,7 +567,7 @@ function homeView() {
     <div class="stat"><b class="num">${S.sessions.length}</b><span>total sessions</span></div>
   </div>
   <h3>Pick a different day</h3>
-  <div class="daylist">${S.days.map((dy, i) => `<button class="dayrow ${dy.id === nxt.id ? 'next' : ''}" data-act="start" data-day="${esc(dy.id)}"><span class="dot">${i + 1}</span><span class="grow"><span class="t">${esc(dy.name)}</span><br><span class="small mute">${dy.items.length} exercises · ${dayLast(dy.id)}</span></span><span class="chev">›</span></button>`).join('')}</div>
+  <div class="daylist">${S.days.map((dy, i) => `<button class="dayrow ${dy.id === nxt.id ? 'next' : ''}" data-act="preview" data-day="${esc(dy.id)}"><span class="dot">${i + 1}</span><span class="grow"><span class="t">${esc(dy.name)}</span><br><span class="small mute">${dy.items.length} exercises · ${dayLast(dy.id)}</span></span><span class="chev">›</span></button>`).join('')}</div>
   ${!storageOK ? '<div class="banner">Storage is unavailable in this browser mode — your logs will not be saved. Export from Settings to keep a copy.</div>' : ''}`;
 }
 
@@ -582,15 +583,54 @@ function setRowHTML(ex, item, exId, i, s, lastSets) {
   </div>`;
 }
 
+function metaOf(item, ex) {
+  if (ex.type === 'cardio') return `${item.mins} min`;
+  return `${item.sets} sets · ${item.repMin}–${item.repMax} reps${item.rest ? ` · rest ${item.rest >= 60 ? item.rest / 60 + ' min' : item.rest + 's'}` : ''}`;
+}
+const searchLink = (ex) => `<a class="iconbtn" href="https://www.google.com/search?q=${encodeURIComponent(ex.name + ' exercise form')}" target="_blank" rel="noopener noreferrer" aria-label="Search Google for ${esc(ex.name)}"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg></a>`;
+
+// View-only look at a day: exercises, last numbers and suggestions. Starting the workout is a separate, explicit step.
+function previewView() {
+  const day = dayById(view.previewDay);
+  if (!day) return '';
+  const inProgress = S.draft && S.draft.dayId === day.id;
+  const warm = day.warm.length ? `<article class="card"><div class="eyebrow">Warm-up</div>${day.warm.map((w) => `<div class="srow"><span>${esc(w.name)}</span><span class="s">${esc(w.detail)}</span></div>`).join('')}</article>` : '';
+  const cards = day.items.map((it, i) => {
+    const ex = S.exercises[it.ex], sg = suggest(it.ex, it);
+    const icon = sg.kind === 'up' ? '▲' : sg.kind === 'down' ? '▼' : sg.kind === 'stall' ? '◆' : '●';
+    return `<article class="card ex">
+      <div class="exhead"><span class="letter">${letter(i)}</span><div class="grow"><div class="exname">${esc(ex.name)}</div><div class="exmeta">${esc(metaOf(it, ex))}</div></div>${searchLink(ex)}</div>
+      ${it.note ? `<div class="note">${esc(it.note)}</div>` : ''}
+      ${sg.last ? `<div class="last">Last · ${esc(dShort(sg.last.date))}: <b class="num">${esc(setsStr(ex, sg.last.e))}</b></div>` : ''}
+      ${sg.msg ? `<div class="sugg ${sg.kind}"><span aria-hidden="true">${icon}</span><span>${esc(sg.msg)}</span></div>` : ''}
+    </article>`;
+  }).join('');
+  return `<div class="whead"><div class="wtop">
+      <button class="btn ghost sm" data-act="closePreview" aria-label="Back to home">‹ Back</button>
+      <div class="title">${esc(day.name)}</div>
+      <button class="btn primary sm" data-act="start" data-day="${esc(day.id)}">${inProgress ? 'Resume' : 'Start'}</button>
+    </div></div>
+    <p class="small mute" style="margin:4px 2px 12px">Preview only. Nothing is logged until you start the workout.</p>
+    ${warm}${cards}
+    <div style="margin-top:12px"><button class="btn primary big" data-act="start" data-day="${esc(day.id)}">${inProgress ? 'Resume workout' : 'Start workout'}</button></div>
+    <div style="margin-top:8px;text-align:center"><button class="btn ghost" data-act="closePreview">Close preview</button></div>`;
+}
+
+// true once anything has actually been logged in the open workout
+function draftHasData(d) {
+  return Object.keys(d.entries).some((id) => {
+    const e = d.entries[id];
+    return e.sets ? e.sets.some((s) => s.done || String(s.r).trim() !== '') : (e.done || String(e.kcal).trim() !== '');
+  });
+}
+
 function exerciseCard(item, idx, d) {
   const exId = item.ex, ex = S.exercises[exId];
   const e = ensureEntry(d, item);
   const done = exerciseDone(item, e);
   const sg = suggest(exId, item);
   const restSec = item.rest || S.settings.rest;
-  let meta;
-  if (ex.type === 'cardio') meta = `${item.mins} min`;
-  else meta = `${item.sets} sets · ${item.repMin}–${item.repMax} reps${item.rest ? ` · rest ${item.rest >= 60 ? item.rest / 60 + ' min' : item.rest + 's'}` : ''}`;
+  const meta = metaOf(item, ex);
   let lastLine = '';
   if (sg.last) lastLine = `<div class="last">Last · ${esc(dShort(sg.last.date))}: <b class="num">${esc(setsStr(ex, sg.last.e))}</b></div>`;
   let sugg = '';
@@ -828,10 +868,11 @@ function render(keepScroll) {
   const y = window.scrollY;
   let html;
   if (view.screen === 'workout' && S.draft) html = workoutView();
+  else if (view.screen === 'preview' && view.previewDay) html = previewView();
   else if (view.screen === 'summary' && view.summary) html = summaryView();
   else { view.screen = null; html = ({ train: homeView, progress: progressView, history: historyView, settings: settingsView })[view.tab](); }
   $('#app').innerHTML = html;
-  const immersive = view.screen === 'workout' || view.screen === 'summary';
+  const immersive = view.screen === 'workout' || view.screen === 'summary' || view.screen === 'preview';
   $('#tabbar').style.display = immersive ? 'none' : '';
   document.querySelectorAll('.tab').forEach((t) => { if (t.dataset.tab === view.tab && !immersive) t.setAttribute('aria-current', 'page'); else t.removeAttribute('aria-current'); });
   window.scrollTo(0, keepScroll ? y : 0);
@@ -1174,7 +1215,12 @@ document.addEventListener('click', (ev) => {
     case 'tab': view.tab = el.dataset.tab; view.screen = null; render(); break;
     case 'start': startWorkout(el.dataset.day); break;
     case 'resume': view.screen = 'workout'; setWake(true); render(); break;
-    case 'back': view.screen = null; setWake(false); render(); break;
+    case 'back':
+      // leaving a workout where nothing was logged just drops it, so an accidental start leaves nothing behind
+      if (S.draft && !draftHasData(S.draft)) { S.draft = null; save(); stopTimer(); }
+      view.screen = null; setWake(false); render(); break;
+    case 'preview': view.previewDay = el.dataset.day; view.screen = 'preview'; render(); break;
+    case 'closePreview': view.screen = null; view.previewDay = null; render(); break;
     case 'finish': finishWorkout(); break;
     case 'closeSummary': view.screen = null; view.summary = null; view.tab = 'train'; render(); break;
     case 'discard': if (confirm('Discard this workout and everything you entered?')) { S.draft = null; save(); stopTimer(); setWake(false); view.screen = null; render(); } break;
